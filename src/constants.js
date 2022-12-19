@@ -12,3 +12,5 @@ export const ERRORS = {
   errResp: "error",
   wrongCommand: "Wrong command! Type in format: 'name value'",
 };
+
+export const COMPRESS_TYPE = '.gz'

@@ -1,18 +1,21 @@
 import path from "node:path";
 import fs from "node:fs/promises";
 import os from "node:os";
+import crypto from "node:crypto";
+import zlib from "node:zlib";
 import { createReadStream, createWriteStream } from "node:fs";
-import { COLORS, ERRORS } from "./constants.js";
-import { isDirectory, isFile } from "./helpers.js";
+import { pipeline } from "node:stream";
 
-const notFile = "Not a file. If file name contains spaces use single quotes ''";
-const errResp = "error";
+import { COLORS, ERRORS, COMPRESS_TYPE } from "./constants.js";
+import { isDirectory, isFile, onExit } from "./helpers.js";
 
 export class Commands {
   #currentDir = "";
-
-  constructor(dirPath) {
+  #userName = "";
+  
+  constructor(dirPath, user) {
     this.#currentDir = dirPath;
+    this.#userName = user;
   }
 
   #wrongCommand(text) {
@@ -54,6 +57,7 @@ export class Commands {
 
   up() {
     this.#currentDir = path.resolve(path.sep);
+    this.showCurrentDir();
   }
   // FILES
   async cat(filePath) {
@@ -82,8 +86,8 @@ export class Commands {
   }
 
   async cp(filePath, newDirPath) {
-    const _filePath = path.resolve(this.#currentDir, filePath);
-    const _dirPath = path.resolve(this.#currentDir, newDirPath);
+    const _filePath = path.resolve(this.#currentDir, filePath ?? "");
+    const _dirPath = path.resolve(this.#currentDir, newDirPath ?? "");
     const isCorrectArgs =
       (await isFile(_filePath)) && (await isDirectory(_dirPath));
     if (!isCorrectArgs) return this.#wrongCommand(ERRORS.wrongPath);
@@ -94,21 +98,99 @@ export class Commands {
   }
 
   async rm(filePath) {
-    const _filePath = path.resolve(this.#currentDir, filePath);
-    if (!(await isFile(_filePath))) return this.#wrongCommand(notFile);
+    const _filePath = path.resolve(this.#currentDir, filePath ?? "");
+    if (!(await isFile(_filePath))) return this.#wrongCommand(ERRORS.notFile);
     fs.rm(_filePath);
   }
 
   async mv(filePath, newDirPath) {
     const resp = await this.cp(filePath, newDirPath);
-    if (resp === errResp) return;
+    if (resp === ERRORS.errResp) return;
     await this.rm(filePath);
   }
+  // OS
+  os(param) {
+    const osCommands = {
+      EOL: JSON.stringify(os.EOL),
+      cpus: os.cpus(),
+      homedir: os.homedir(),
+      username: os.userInfo().username,
+      architecture: os.arch(),
+    };
 
+    const command = param?.slice(2);
+    if (command && Object.keys(osCommands).includes(command)) {
+      console.log(osCommands[command]);
+      return console.log(COLORS.green);
+    }
+    this.#wrongCommand(ERRORS.wrongCommand);
+  }
+  // HASH
+  async hash(filePath) {
+    const _filePath = path.resolve(this.#currentDir, filePath ?? "");
+    if (!(await isFile(_filePath))) return this.#wrongCommand(ERRORS.notFile);
+
+    const hash = crypto.createHash("sha256");
+    const rs = createReadStream(_filePath);
+    rs.on("readable", () => {
+      const data = rs.read();
+      if (data) {
+        hash.update(data);
+      } else {
+        console.log(hash.digest("hex"), os.EOL);
+      }
+    });
+  }
+  // COMPRESS
+  async compress(filePath, outputPath) {
+    const _filePath = path.resolve(this.#currentDir, filePath ?? "");
+    if (!(await isFile(_filePath))) return this.#wrongCommand(ERRORS.notFile);
+
+    const _outputPath = path.resolve(this.#currentDir, outputPath ?? "");
+    if (!(await isDirectory(_outputPath))) this.#wrongCommand(ERRORS.wrongPath);
+
+    const newFileName = path.resolve(
+      _outputPath,
+      path.basename(_filePath) + COMPRESS_TYPE
+    );
+
+    pipeline(
+      createReadStream(_filePath),
+      zlib.createGzip(),
+      createWriteStream(newFileName),
+      () => console.log(COLORS.green, "OUTPUT: ", newFileName)
+    );
+  }
+
+  async decompress(filePath, outputPath) {
+    const _filePath = path.resolve(this.#currentDir, filePath ?? "");
+    if (!(await isFile(_filePath))) return this.#wrongCommand(ERRORS.notFile);
+
+    const _outputPath = path.resolve(this.#currentDir, outputPath ?? "");
+    if (!(await isDirectory(_outputPath))) this.#wrongCommand(ERRORS.wrongPath);
+
+    const fileName = path.basename(_filePath);
+    const newFileName = path.resolve(
+      _outputPath,
+      fileName.slice(0, fileName.length - COMPRESS_TYPE.length)
+    );
+
+    pipeline(
+      createReadStream(_filePath),
+      zlib.createGunzip(),
+      createWriteStream(newFileName),
+      () => console.log(COLORS.green, "OUTPUT: ", newFileName)
+    );
+  }
+
+  exit() {
+    onExit(this.#userName);
+  }
+  // Run command
   run(command, value, value2) {
     console.clear();
-    console.log("COMMAND: ", command, value);
     const f = this[command]?.bind(this, value, value2);
+
     if (f) {
       f(value, value2);
     } else {

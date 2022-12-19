@@ -1,7 +1,8 @@
-import { argv } from "node:process";
+import process, { argv } from "node:process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { COLORS } from "./constants.js";
 
 export function getUserName() {
   const userArg = "--username=";
@@ -31,4 +32,12 @@ export async function isFile(url) {
   } catch {
     return false;
   }
+}
+
+export function onExit(user) {
+  console.log(
+    COLORS.blue,
+    `Thank you for using File Manager, ${user}!, goodbye`
+  );
+  process.exit(0);
 }
